@@ -46,11 +46,13 @@
 #include <vcl/graph.hxx>
 #include <vcl/graphicfilter.hxx>
 #include <comphelper/random.hxx>
+#include <comphelper/syntaxhighlight.hxx>
 #include <comphelper/propertysequence.hxx>
 #include <comphelper/sequence.hxx>
 #include <comphelper/sequenceashashmap.hxx>
 #include <comphelper/processfactory.hxx>
 #include <comphelper/propertyvalue.hxx>
+#include <editeng/colritem.hxx>
 #include <sfx2/sfxbasemodel.hxx>
 #include <rtl/uri.hxx>
 #include <ndgrf.hxx>
@@ -75,6 +77,43 @@ bool allowAccessLink(const SwDoc& rDoc)
         sReferer = sh->GetMedium()->GetName();
     }
     return !SvtSecurityOptions::isUntrustedReferer(sReferer);
+}
+
+bool MapLang(std::u16string_view rLang, HighlighterLanguage& rLanguage)
+{
+    if (rLang.equalsIgnoreAsciiCase("sql"))
+    {
+        rLanguage = HighlighterLanguage::SQL;
+        return true;
+    }
+
+    if (rLang.equalsIgnoreAsciiCase("basic") || rLang.equalsIgnoreAsciiCase("vb")
+        || rLang.equalsIgnoreAsciiCase("vba"))
+    {
+        rLanguage = HighlighterLanguage::Basic;
+        return true;
+    }
+
+    return false;
+}
+
+Color GetCodeColor(TokenType eType)
+{
+    switch (eType)
+    {
+        case TokenType::Keywords:
+            return Color(0x00, 0x00, 0xFF);
+        case TokenType::String:
+            return Color(0x00, 0x80, 0x00);
+        case TokenType::Comment:
+            return Color(0x80, 0x80, 0x80);
+        case TokenType::Number:
+            return Color(0x00, 0x80, 0x80);
+        case TokenType::Operator:
+            return Color(0x80, 0x00, 0x00);
+        default:
+            return COL_BLACK;
+    }
 }
 }
 
@@ -576,7 +615,7 @@ void SwMarkdownParser::EndHtmlBlock()
     m_htmlData.clear();
 }
 
-void SwMarkdownParser::BeginCodeBlock()
+void SwMarkdownParser::BeginCodeBlock(const OUString& rLang)
 {
     if (m_pPam->GetPoint()->GetContentIndex())
         AppendTextNode(AM_SPACE);
@@ -589,10 +628,54 @@ void SwMarkdownParser::BeginCodeBlock()
 
     SvxBrushItem aBrushItem(COL_CODE_BLOCK, RES_BACKGROUND);
     m_xDoc->getIDocumentContentOperations().InsertPoolItem(*m_pPam, aBrushItem);
+
+    m_sCodeBlockLang = rLang;
+    m_sCodeBlockText.clear();
+    m_bInCodeBlock = true;
 }
 
 void SwMarkdownParser::EndCodeBlock()
 {
+    if (m_bInCodeBlock && !m_sCodeBlockText.isEmpty() && !m_sCodeBlockLang.isEmpty())
+    {
+        HighlighterLanguage eLang = HighlighterLanguage::Basic;
+        if (MapLang(m_sCodeBlockLang, eLang))
+        {
+            SyntaxHighlighter aHighlighter(eLang);
+            std::vector<HighlightPortion> aPortions;
+            aHighlighter.getHighlightPortions(m_sCodeBlockText, aPortions);
+
+            for (const auto& rPortion : aPortions)
+            {
+                OUString aToken
+                    = m_sCodeBlockText.copy(rPortion.nBegin, rPortion.nEnd - rPortion.nBegin);
+
+                SwContentNode* pCnd = m_pPam->GetPointContentNode();
+                sal_Int32 nStart = m_pPam->GetPoint()->GetContentIndex();
+
+                m_xDoc->getIDocumentContentOperations().InsertString(*m_pPam, aToken);
+
+                Color aColor = GetCodeColor(rPortion.tokenType);
+                if (aColor != COL_BLACK)
+                {
+                    SwPaM aPam(*m_pPam->GetPoint());
+                    aPam.SetMark();
+                    aPam.GetMark()->Assign(*pCnd, nStart);
+                    SvxColorItem aColorItem(aColor, RES_CHRATR_COLOR);
+                    m_xDoc->getIDocumentContentOperations().InsertPoolItem(aPam, aColorItem);
+                }
+            }
+        }
+        else
+        {
+            InsertText(m_sCodeBlockText);
+        }
+    }
+
+    m_bInCodeBlock = false;
+    m_sCodeBlockLang.clear();
+    m_sCodeBlockText.clear();
+
     if (m_pPam->GetPoint()->GetContentIndex())
         AppendTextNode(AM_SPACE);
     else

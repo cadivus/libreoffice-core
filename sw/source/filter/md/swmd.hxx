@@ -86,6 +86,8 @@ class SwMarkdownParser
 
     OUString m_htmlData;
     OUString m_sBaseURL;
+    OUString m_sCodeBlockLang;
+    OUString m_sCodeBlockText;
 
     sal_Int32 m_nBlockQuoteDepth = -1;
     tools::Long m_nProgress = 0;
@@ -93,6 +95,7 @@ class SwMarkdownParser
     bool m_bNewDoc;
     bool m_bNoParSpace = true;
     bool m_bInsideImage = false;
+    bool m_bInCodeBlock = false;
 
     MDImage m_aImg;
     std::vector<MDTable*> m_aTables;
@@ -128,7 +131,7 @@ class SwMarkdownParser
     void InsertHtmlData();
     void EndHtmlBlock();
 
-    void BeginCodeBlock();
+    void BeginCodeBlock(const OUString& rLang = OUString());
     void EndCodeBlock();
 
     void InsertText(const OUString& aStr);

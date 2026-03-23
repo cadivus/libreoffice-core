@@ -66,8 +66,15 @@ int SwMarkdownParser::enter_block_callback(MD_BLOCKTYPE type, void* detail, void
             break;
         }
         case MD_BLOCK_CODE:
-            parser->BeginCodeBlock();
+        {
+            const MD_BLOCK_CODE_DETAIL* pDetail = static_cast<const MD_BLOCK_CODE_DETAIL*>(detail);
+            OUString sLang;
+            if (pDetail->lang.size > 0)
+                sLang = OStringToOUString({ pDetail->lang.text, pDetail->lang.size },
+                                          RTL_TEXTENCODING_UTF8);
+            parser->BeginCodeBlock(sLang);
             break;
+        }
         case MD_BLOCK_HTML:
             parser->BeginHtmlBlock();
             break;
@@ -280,7 +287,17 @@ int SwMarkdownParser::text_callback(MD_TEXTTYPE type, const MD_CHAR* text, MD_SI
             OUString aText = OStringToOUString({ text, size }, RTL_TEXTENCODING_UTF8);
 
             if (!parser->m_bInsideImage)
-                parser->InsertText(aText);
+            {
+                if (type == MD_TEXT_CODE && parser->m_bInCodeBlock
+                    && !parser->m_sCodeBlockLang.isEmpty())
+                {
+                    parser->m_sCodeBlockText += aText;
+                }
+                else
+                {
+                    parser->InsertText(aText);
+                }
+            }
             else
                 parser->m_aImg.desc = std::move(aText);
 
